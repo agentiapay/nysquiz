@@ -1,8 +1,5 @@
 fastapi
-uvicorn
-google-genai
-imaplib
-threading
-select
 pydantic
-email
+google-genai
+uvicorn
+python-dotenv
