@@ -31,6 +31,10 @@ app.add_middleware(
     allow_headers=["*"],  
 )
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 # Define Request Model for Transaction ID
 class TransactionRequest(BaseModel):
     transaction_id: str
