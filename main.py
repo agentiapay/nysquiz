@@ -13,7 +13,7 @@ import select
 IMAP_SERVER = "imap.gmail.com"
 EMAIL_ACCOUNT = "najafali32304@gmail.com"
 EMAIL_PASSWORD = "mypi yoof teqz gygl"  # Use App Password if 2FA is enabled
-SPECIFIC_SENDER = "freeskills512@gmail.com"
+SPECIFIC_SENDER = "agentiapay@gmail.com"
 emails = "emails.txt"  # File to store captured emails
 
 # FastAPI App
