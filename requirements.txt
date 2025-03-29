@@ -1,6 +1,2 @@
-email
 fastapi
-threading
-select
 uvicorn
-imaplib
