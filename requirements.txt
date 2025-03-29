@@ -1,3 +1,8 @@
 fastapi
 uvicorn
-google
+google-genai
+imaplib
+threading
+select
+pydantic
+email
