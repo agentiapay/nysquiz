@@ -4,3 +4,4 @@ google-genai
 uvicorn
 python-dotenv
 imapclient
+aiofiles
