@@ -95,10 +95,10 @@ def capture_emails():
             except Exception as e:
                 print(f"⚠️ Error: {e}")
 
-
-@app.get("/health")
+@app.get("/")
 async def health_check():
     return {"status": "ok"}
+
      
 # FastAPI route to get the captured emails
 @app.get("/emails")
@@ -135,4 +135,5 @@ async def Id(data:PromtData):
     # captured_emails.append(llm_response)
     return llm_response
 
-
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
