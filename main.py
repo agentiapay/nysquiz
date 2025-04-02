@@ -1,152 +1,134 @@
-import imaplib
+import imapclient
 import email
 from email.header import decode_header
-from fastapi import FastAPI
-from pydantic import BaseModel
-from google import genai
-from fastapi.middleware.cors import CORSMiddleware
 import threading
-import time
-import select
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from google import genai
+import aiofiles
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
-# Email Settings
-IMAP_SERVER = "imap.gmail.com"
-EMAIL_ACCOUNT = "najafali32304@gmail.com"
-EMAIL_PASSWORD = "mypi yoof teqz gygl"  # Use App Password if 2FA is enabled
-SPECIFIC_SENDER = "agentiapay@gmail.com"
-emails = "emails.txt"  # File to store captured emails
+class PromtData(BaseModel):
+    transaction_id:str
 
-# FastAPI App
+# FastAPI app
 app = FastAPI()
 
-# ✅ Allow frontend requests from GitHub Codespaces & localhost
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  
-        "https://legendary-chainsaw-q769g7v7qx6424gwr-8000.app.github.dev"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+emails_database = "emails.txt"
+# Gmail credentials
+EMAIL_ACCOUNT = "najafali32304@gmail.com"
+EMAIL_PASSWORD = "lumh szck uoht ymre"  # Use an App Password
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+# Specific sender's email
+SPECIFIC_SENDER = "agentiapay@gmail.com"
+client = genai.Client(api_key="AIzaSyBo2b6UyVbCepoxQwEgP91FFHx_v-bOAKI")
 
-# Define Request Model for Transaction ID
-class TransactionRequest(BaseModel):
-    transaction_id: str
+# Store captured emails
+captured_emails = []
+# Function to decode email subject and sender
+def decode_header_value(value):
+    decoded_value, encoding = decode_header(value)[0]
+    if isinstance(decoded_value, bytes):
+        decoded_value = decoded_value.decode(encoding if encoding else 'utf-8')
+    return decoded_value
 
-# IMAP IDLE Listener Function
-def imap_idle():
-    while True:
-        try:
-            print("📩 Listening for new emails...")
-            mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-            mail.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
-            mail.select("inbox")
+# Function to extract plain text content from email
+def get_email_body(msg):
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                return part.get_payload(decode=True).decode(part.get_content_charset())
+    else:
+        return msg.get_payload(decode=True).decode(msg.get_content_charset())
 
-            # Start IMAP IDLE mode
-            mail.send(b"IDLE\r\n")
-            response = mail.readline()
+# Function to capture emails using efficient IMAP IDLE
+def capture_emails():
+    with imapclient.IMAPClient("imap.gmail.com", ssl=True) as client:
+        client.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
+        client.select_folder("INBOX")
 
-            # Use select() to wait for changes in the mailbox
-            if response.startswith(b"+ idling"):
-                while True:
-                    ready, _, _ = select.select([mail.socket()], [], [], None)  # Block until an email arrives
-                    if ready:
-                        mail.send(b"DONE\r\n")  # Exit IDLE mode
-                        break  # New email detected, process it
+        print(f"🔄 Listening for new emails from: {SPECIFIC_SENDER} (Efficient IMAP IDLE)")
 
-            # Fetch the latest email
-            fetch_latest_email()
-            mail.close()
-            mail.logout()
-        except Exception as e:
-            print(f"❌ IMAP Error: {e}")
-            time.sleep(5)  # Wait and retry if an error occurs
+        while True:
+            try:
+                # Wait indefinitely for new emails (reducing quota usage)
+                client.idle()
+                responses = client.idle_check(timeout=None)  # Wait indefinitely
+                client.idle_done()
 
-# Fetch Latest Email
-def fetch_latest_email():
-    try:
-        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-        mail.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
-        mail.select("inbox")
+                if responses:
+                    # Fetch unseen emails from the specific sender
+                    messages = client.search(["UNSEEN", "FROM", SPECIFIC_SENDER])
+                    for msg_id in messages:
+                        msg_data = client.fetch(msg_id, ["RFC822"])
+                        raw_email = msg_data[msg_id][b"RFC822"]
 
-        # Search for unread emails from the specific sender
-        _, messages = mail.search(None, f'(UNSEEN FROM "{SPECIFIC_SENDER}")')
-        email_ids = messages[0].split()
+                        # Parse email
+                        msg = email.message_from_bytes(raw_email)
+                        subject = decode_header_value(msg["Subject"])
+                        sender = decode_header_value(msg.get("From"))
+                        body = get_email_body(msg)
+                        with open(emails_database,"a") as db:
+                            db.write(str(body))
 
-        if not email_ids:
-            return {"status": "no_new_email"}
+                        # Store the captured email
+                        captured_emails.append({
+                            "From": sender,
+                            "Subject": subject,
+                            "Body": body,
+                        })
 
-        latest_email_id = email_ids[-1]  
-        _, msg_data = mail.fetch(latest_email_id, "(RFC822)")
+                        print(f"\n📩 New Email Received:")
+                        print(f"From: {sender}")
+                        print(f"Subject: {subject}")
+                        print(f"Body: {body}")
 
-        for response_part in msg_data:
-            if isinstance(response_part, tuple):
-                msg = email.message_from_bytes(response_part[1])
-                
-                # Decode Subject
-                subject, encoding = decode_header(msg["Subject"])[0]
-                if isinstance(subject, bytes):
-                    subject = subject.decode(encoding or "utf-8")
+            except Exception as e:
+                print(f"⚠️ Error: {e}")
 
-                # Extract Email Body (Plain Text)
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        content_type = part.get_content_type()
-                        content_disposition = str(part.get("Content-Disposition"))
+# FastAPI route to get the captured emails
+@app.get("/emails")
+async def get_emails():
+    return JSONResponse(content=captured_emails)
 
-                        if content_type == "text/plain" and "attachment" not in content_disposition:
-                            body = part.get_payload(decode=True).decode()
-                            break  
-                else:
-                    body = msg.get_payload(decode=True).decode()
+# Start email capturing in a background thread on startup
+@app.on_event("startup")
+async def on_startup():
+    threading.Thread(target=capture_emails, daemon=True).start()
 
-                emails_data = {
-                    "status": "success",
-                    "subject": subject,
-                    "body": body.strip()
-                }
-                print("✅ New Email Captured:", emails_data)
-                
-                with open(emails, "a") as add_emails:
-                    add_emails.write(str(emails_data) + "\n")
 
-                return emails_data
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# Start IMAP IDLE in a separate thread
-threading.Thread(target=imap_idle, daemon=True).start()
-
-# API to Retrieve All Saved Emails
-@app.get("/get-emails")
-async def get_saved_emails_api():
-    return {"status": "success", "emails": fetch_latest_email()}
-
-# API to Verify Transaction
 @app.post("/id")
-async def verify_transaction(request: TransactionRequest):
-    transaction_id = request.transaction_id
-    print(f"Received Transaction ID: {transaction_id}")
-
-    with open(emails, "r") as data:
-        read_data = data.read()
-
-    client = genai.Client(api_key="AIzaSyBo2b6UyVbCepoxQwEgP91FFHx_v-bOAKI")
+async def Id(data:PromtData):
+    async with aiofiles.open(emails_database, "r") as f:
+        read_data = await f.readlines()
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=f"Check if transaction ID {transaction_id} exists in {read_data}. If it exists, return 'Payment Successful'; otherwise, return 'Please make the payment first.' no extra explanation"
-    )
-    
+    model="gemini-2.0-flash", contents=f"""
+        You are an AI that strictly follows instructions. 
+        Do not return any code, function, or explanation.
+
+        Check if transaction ID '{data.transaction_id}' exists in the following data:
+        {str(read_data)}
+
+        If found, respond with exactly: Payment Successful
+        If not found, respond with exactly: Please make the payment first
+
+        Do not add extra text or formatting. Respond only with one of the two phrases.
+        """
+)
     llm_response = response.text
-    print(llm_response)
-    
-    return {"status": llm_response}
+    # print(llm_response)
+    # captured_emails.append(llm_response)
+    return llm_response
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
