@@ -3,3 +3,4 @@ pydantic
 google-genai
 uvicorn
 python-dotenv
+imapclient
