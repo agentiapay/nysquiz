@@ -33,6 +33,7 @@ client = genai.Client(api_key="AIzaSyBo2b6UyVbCepoxQwEgP91FFHx_v-bOAKI")
 
 # Store captured emails
 captured_emails = []
+
 # Function to decode email subject and sender
 def decode_header_value(value):
     decoded_value, encoding = decode_header(value)[0]
@@ -94,6 +95,11 @@ def capture_emails():
             except Exception as e:
                 print(f"⚠️ Error: {e}")
 
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+     
 # FastAPI route to get the captured emails
 @app.get("/emails")
 async def get_emails():
