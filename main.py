@@ -135,6 +135,4 @@ async def Id(data:PromtData):
     # captured_emails.append(llm_response)
     return llm_response
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
