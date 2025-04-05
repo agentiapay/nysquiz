@@ -99,7 +99,7 @@ def poll_emails():
 
 # home end point
 @app.get("/")
-def Home():
+def Health_Check():
     return {"status":"ok"}
 
 # Endpoint to verify transaction ID
