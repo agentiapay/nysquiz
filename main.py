@@ -1,89 +1,127 @@
-import asyncio
+import imaplib
 import email
 from email.header import decode_header
-from aioimaplib import IMAP4_SSL
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import firebase_admin
+from firebase_admin import credentials, firestore
 
+# Firebase initialization
+cred = credentials.Certificate('credentials.json')  # Path to your Firebase credentials JSON file
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+emails_ref = db.collection('captured_emails')  # Collection to store emails
+
+# Email and sender details
 EMAIL_ACCOUNT = "najafali32304@gmail.com"
 EMAIL_PASSWORD = "lumh szck uoht ymre"
 SPECIFIC_SENDER = "agentiapay@gmail.com"
 
+# FastAPI app setup
 app = FastAPI()
-captured_emails = []
 
+# CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Pydantic model to capture ID from frontend
+class getId(BaseModel):
+    id: str
+
+# Decode email header
 def decode_header_value(value):
     if not value:
-        return ""  # Return empty string if value is None or empty
-    decoded_parts = decode_header(value)
-    if not decoded_parts:
         return ""
+    decoded_parts = decode_header(value)
     decoded_value, encoding = decoded_parts[0]
     if isinstance(decoded_value, bytes):
-        return decoded_value.decode(encoding or 'utf-8', errors='ignore')
+        return decoded_value.decode(encoding or "utf-8", errors="ignore")
     return decoded_value
 
+# Extract email body
 def get_email_body(msg):
     if msg.is_multipart():
         for part in msg.walk():
             if part.get_content_type() == "text/plain" and not part.get("Content-Disposition"):
-                return part.get_payload(decode=True).decode(part.get_content_charset() or 'utf-8')
+                return part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8")
     else:
-        return msg.get_payload(decode=True).decode(msg.get_content_charset() or 'utf-8')
+        return msg.get_payload(decode=True).decode(msg.get_content_charset() or "utf-8")
 
-async def listen_for_emails():
-    while True:
-        try:
-            client = IMAP4_SSL("imap.gmail.com")
-            await client.wait_hello_from_server()
-            await client.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
-            await client.select("INBOX")
+# LLM response for transaction ID verification
+from google import genai
+client = genai.Client(api_key="AIzaSyAxz3kNZLBz2PH124b-pfqVuulj960QvKo")
 
-            print(f"🔄 Listening for new emails from: {SPECIFIC_SENDER}")
+# Endpoint to poll emails
+@app.get("/poll-emails")
+def poll_emails():
+    try:
+        # Connect to Gmail IMAP server
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
+        mail.select("inbox")
 
-            while True:
-                idle = await client.idle_start(timeout=29 * 60)  # Gmail kills idle after ~30 min
-                while client.has_pending_idle():
-                    msg = await client.wait_server_push()
-                    if msg and b"EXISTS" in msg[1]:
-                        await client.idle_done()
-                        await asyncio.wait_for(idle, timeout=5)
+        # Search for unseen emails
+        result, data = mail.search(None, "UNSEEN")
+        email_ids = data[0].split()
 
-                        result, data = await client.search("UNSEEN")
-                        if result == "OK":
-                            for uid in data[0].split():
-                                res, msg_data = await client.fetch(uid, "(RFC822)")
-                                if res == "OK":
-                                    raw_email = msg_data[1][1]
-                                    email_msg = email.message_from_bytes(raw_email)
+        new_emails = []
+        
+        # Loop through each email
+        for eid in email_ids:
+            res, msg_data = mail.fetch(eid, "(RFC822)")
+            if res == "OK":
+                raw_email = msg_data[0][1]
+                msg = email.message_from_bytes(raw_email)
+                sender = decode_header_value(msg.get("From"))
+                
+                if SPECIFIC_SENDER in sender:
+                    body = get_email_body(msg)
+                    new_emails.append(body)
 
-                                    sender = decode_header_value(email_msg.get("From"))
-                                    if SPECIFIC_SENDER in sender:
-                                        subject = decode_header_value(email_msg.get("Subject"))
-                                        body = get_email_body(email_msg)
+                    # Store email in Firestore (instead of appending to .txt file)
+                    email_data = {
+                        'body': body
+                    }
+                    emails_ref.add(email_data)
 
-                                        captured_emails.append({
-                                            "From": sender,
-                                            "Subject": subject,
-                                            "Body": body
-                                        })
+        # Logout from the email server
+        mail.logout()
+        return {"status": "emails captured and stored in Firestore"}
 
-                                        print("\n📩 New Email Received:")
-                                        print(f"From: {sender}")
-                                        print(f"Subject: {subject}")
-                                        print(f"Body: {body}")
-                        break
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-        except Exception as e:
-            print(f"⚠️ Error occurred: {e}. Retrying in 5 seconds...")
-            await asyncio.sleep(5)
+# home end point
 @app.get("/")
-async def home():
+def Home():
     return {"status":"ok"}
-@app.on_event("startup")
-async def start_email_listener():
-    asyncio.create_task(listen_for_emails())
 
-@app.get("/emails")
-def get_emails():
-    return JSONResponse(content=captured_emails)
+# Endpoint to verify transaction ID
+@app.post("/id")
+def Id(userId: getId):
+    # Fetch emails from Firestore to search for the Transaction ID
+    emails = emails_ref.stream()
+    email_texts = ""
+    for email_doc in emails:
+        email_data = email_doc.to_dict()
+        email_texts += email_data.get('body', '')  # Concatenate all email bodies
+
+    # Use the LLM to check the transaction ID in the emails
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=f"""
+        Search for the given Transaction ID: '{userId.id}' within the string representation of the provided data: '{email_texts}'.
+        If the ID is found, return the string "payment successful".
+        Otherwise, return "make payment first". response output must be in one line. You are AI, so follow these instructions.
+        """
+    )
+
+    llm_response = response.text
+    print(llm_response)
+    return llm_response
