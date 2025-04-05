@@ -77,7 +77,9 @@ async def listen_for_emails():
         except Exception as e:
             print(f"⚠️ Error occurred: {e}. Retrying in 5 seconds...")
             await asyncio.sleep(5)
-
+@app.get("/")
+async def home():
+    return {"status":"ok"}
 @app.on_event("startup")
 async def start_email_listener():
     asyncio.create_task(listen_for_emails())
