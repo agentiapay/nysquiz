@@ -129,7 +129,8 @@ def Id(userId: getId):
 
     llm_response = str(response.text)
     print(llm_response)
-    return {"response":llm_response}
+    return llm_response.strip()
+
 
 if __name__ == "__main__":
     import uvicorn
