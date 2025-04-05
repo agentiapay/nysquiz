@@ -1,139 +1,87 @@
-import imapclient
+import asyncio
 import email
 from email.header import decode_header
-import threading
+from aioimaplib import IMAP4_SSL
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from google import genai
-import aiofiles
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
 
-class PromtData(BaseModel):
-    transaction_id:str
-
-# FastAPI app
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-emails_database = "emails.txt"
-# Gmail credentials
 EMAIL_ACCOUNT = "najafali32304@gmail.com"
-EMAIL_PASSWORD = "lumh szck uoht ymre"  # Use an App Password
-
-# Specific sender's email
+EMAIL_PASSWORD = "lumh szck uoht ymre"
 SPECIFIC_SENDER = "agentiapay@gmail.com"
-client = genai.Client(api_key="AIzaSyBo2b6UyVbCepoxQwEgP91FFHx_v-bOAKI")
 
-# Store captured emails
+app = FastAPI()
 captured_emails = []
 
-# Function to decode email subject and sender
 def decode_header_value(value):
-    decoded_value, encoding = decode_header(value)[0]
+    if not value:
+        return ""  # Return empty string if value is None or empty
+    decoded_parts = decode_header(value)
+    if not decoded_parts:
+        return ""
+    decoded_value, encoding = decoded_parts[0]
     if isinstance(decoded_value, bytes):
-        decoded_value = decoded_value.decode(encoding if encoding else 'utf-8')
+        return decoded_value.decode(encoding or 'utf-8', errors='ignore')
     return decoded_value
 
-# Function to extract plain text content from email
 def get_email_body(msg):
     if msg.is_multipart():
         for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                return part.get_payload(decode=True).decode(part.get_content_charset())
+            if part.get_content_type() == "text/plain" and not part.get("Content-Disposition"):
+                return part.get_payload(decode=True).decode(part.get_content_charset() or 'utf-8')
     else:
-        return msg.get_payload(decode=True).decode(msg.get_content_charset())
+        return msg.get_payload(decode=True).decode(msg.get_content_charset() or 'utf-8')
 
-# Function to capture emails using efficient IMAP IDLE
-def capture_emails():
-    with imapclient.IMAPClient("imap.gmail.com", ssl=True) as client:
-        client.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
-        client.select_folder("INBOX")
+async def listen_for_emails():
+    while True:
+        try:
+            client = IMAP4_SSL("imap.gmail.com")
+            await client.wait_hello_from_server()
+            await client.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
+            await client.select("INBOX")
 
-        print(f"🔄 Listening for new emails from: {SPECIFIC_SENDER} (Efficient IMAP IDLE)")
+            print(f"🔄 Listening for new emails from: {SPECIFIC_SENDER}")
 
-        while True:
-            try:
-                # Wait indefinitely for new emails (reducing quota usage)
-                client.idle()
-                responses = client.idle_check(timeout=None)  # Wait indefinitely
-                client.idle_done()
+            while True:
+                idle = await client.idle_start(timeout=29 * 60)  # Gmail kills idle after ~30 min
+                while client.has_pending_idle():
+                    msg = await client.wait_server_push()
+                    if msg and b"EXISTS" in msg[1]:
+                        await client.idle_done()
+                        await asyncio.wait_for(idle, timeout=5)
 
-                if responses:
-                    # Fetch unseen emails from the specific sender
-                    messages = client.search(["UNSEEN", "FROM", SPECIFIC_SENDER])
-                    for msg_id in messages:
-                        msg_data = client.fetch(msg_id, ["RFC822"])
-                        raw_email = msg_data[msg_id][b"RFC822"]
+                        result, data = await client.search("UNSEEN")
+                        if result == "OK":
+                            for uid in data[0].split():
+                                res, msg_data = await client.fetch(uid, "(RFC822)")
+                                if res == "OK":
+                                    raw_email = msg_data[1][1]
+                                    email_msg = email.message_from_bytes(raw_email)
 
-                        # Parse email
-                        msg = email.message_from_bytes(raw_email)
-                        subject = decode_header_value(msg["Subject"])
-                        sender = decode_header_value(msg.get("From"))
-                        body = get_email_body(msg)
-                        with open(emails_database,"a") as db:
-                            db.write(str(body))
+                                    sender = decode_header_value(email_msg.get("From"))
+                                    if SPECIFIC_SENDER in sender:
+                                        subject = decode_header_value(email_msg.get("Subject"))
+                                        body = get_email_body(email_msg)
 
-                        # Store the captured email
-                        captured_emails.append({
-                            "From": sender,
-                            "Subject": subject,
-                            "Body": body,
-                        })
+                                        captured_emails.append({
+                                            "From": sender,
+                                            "Subject": subject,
+                                            "Body": body
+                                        })
 
-                        print(f"\n📩 New Email Received:")
-                        print(f"From: {sender}")
-                        print(f"Subject: {subject}")
-                        print(f"Body: {body}")
+                                        print("\n📩 New Email Received:")
+                                        print(f"From: {sender}")
+                                        print(f"Subject: {subject}")
+                                        print(f"Body: {body}")
+                        break
 
-            except Exception as e:
-                print(f"⚠️ Error: {e}")
+        except Exception as e:
+            print(f"⚠️ Error occurred: {e}. Retrying in 5 seconds...")
+            await asyncio.sleep(5)
 
-@app.get("/")
-async def health_check():
-    return {"status": "ok"}
-
-     
-# FastAPI route to get the captured emails
-@app.get("/emails")
-async def get_emails():
-    return JSONResponse(content=captured_emails)
-
-# Start email capturing in a background thread on startup
 @app.on_event("startup")
-async def on_startup():
-    threading.Thread(target=capture_emails, daemon=True).start()
+async def start_email_listener():
+    asyncio.create_task(listen_for_emails())
 
-
-@app.post("/id")
-async def Id(data:PromtData):
-    async with aiofiles.open(emails_database, "r") as f:
-        read_data = await f.readlines()
-
-    response = client.models.generate_content(
-    model="gemini-2.0-flash", contents=f"""
-        You are an AI that strictly follows instructions. 
-        Do not return any code, function, or explanation.
-
-        Check if transaction ID '{data.transaction_id}' exists in the following data:
-        {str(read_data)}
-
-        If found, respond with exactly: Payment Successful
-        If not found, respond with exactly: Please make the payment first
-
-        Do not add extra text or formatting. Respond only with one of the two phrases.
-        """
-)
-    llm_response = response.text
-    # print(llm_response)
-    # captured_emails.append(llm_response)
-    return llm_response
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+@app.get("/emails")
+def get_emails():
+    return JSONResponse(content=captured_emails)
