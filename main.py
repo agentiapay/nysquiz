@@ -105,14 +105,6 @@ def poll_emails():
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# home end point
-@app.get("/")
-def Home():
-    return {"status":"ok"}
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
 
 # Endpoint to verify transaction ID
 @app.post("/id")
