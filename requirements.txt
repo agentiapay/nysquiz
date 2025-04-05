@@ -1,5 +1,5 @@
-fastapi==0.95.1
-uvicorn==0.22.0
-imapclient==2.3.2
-email==6.0.0
+fastapi
+uvicorn
+imapclient
+email
 aioimaplib
