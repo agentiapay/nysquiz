@@ -99,8 +99,12 @@ def poll_emails():
 
 # home end point
 @app.get("/")
-def Health_Check():
+def Home():
     return {"status":"ok"}
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 
 # Endpoint to verify transaction ID
 @app.post("/id")
@@ -125,3 +129,7 @@ def Id(userId: getId):
     llm_response = response.text
     print(llm_response)
     return llm_response
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
