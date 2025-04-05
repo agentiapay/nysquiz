@@ -30,6 +30,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# home end point
+@app.get("/")
+def Home():
+    return {"status":"ok"}
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+    
 # Pydantic model to capture ID from frontend
 class getId(BaseModel):
     id: str
