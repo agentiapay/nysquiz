@@ -25,7 +25,8 @@ app = FastAPI()
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://psychic-spoon-jj94wjrj5gg4fj5x4-3000.app.github.dev"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
