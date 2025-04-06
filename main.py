@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google import genai
 
 # Firebase initialization
 cred = credentials.Certificate('credentials.json')  # Path to your Firebase credentials JSON file
@@ -25,20 +26,11 @@ app = FastAPI()
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://psychic-spoon-jj94wjrj5gg4fj5x4-3000.app.github.dev"],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# home end point
-@app.get("/")
-def Home():
-    return {"status":"ok"}
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-    
 # Pydantic model to capture ID from frontend
 class getId(BaseModel):
     id: str
@@ -62,8 +54,7 @@ def get_email_body(msg):
     else:
         return msg.get_payload(decode=True).decode(msg.get_content_charset() or "utf-8")
 
-# LLM response for transaction ID verification
-from google import genai
+# LLM client setup
 client = genai.Client(api_key="AIzaSyAxz3kNZLBz2PH124b-pfqVuulj960QvKo")
 
 # Endpoint to poll emails
@@ -106,32 +97,37 @@ def poll_emails():
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-
 # Endpoint to verify transaction ID
 @app.post("/id")
 def Id(userId: getId):
-    # Fetch emails from Firestore to search for the Transaction ID
-    emails = emails_ref.stream()
-    email_texts = ""
-    for email_doc in emails:
-        email_data = email_doc.to_dict()
-        email_texts += email_data.get('body', '')  # Concatenate all email bodies
+    try:
+        # Fetch emails from Firestore to search for the Transaction ID
+        emails = emails_ref.stream()  # This is a synchronous generator
+        email_texts = ""
+        
+        for email_doc in emails:
+            email_data = email_doc.to_dict()  # Get the data of each email document
+            print(f"Email Data: {email_data}")  # Log the fetched email data
+            email_texts += email_data.get('body', '')  # Concatenate all email bodies
 
-    # Use the LLM to check the transaction ID in the emails
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=f"""
-        Search for the given Transaction ID: '{userId.id}' within the string representation of the provided data: '{email_texts}'.
-        If the ID is found, return the string "payment successful".
-        Otherwise, return "make payment first". response output must be in one line. You are AI, so follow these instructions.
-        """
-    )
+        if not email_texts:
+            raise ValueError("No email body found.")
 
-    llm_response = str(response.text)
-    print(llm_response)
-    return llm_response.strip()
+        # Use the LLM to check the transaction ID in the emails
+        print(f"Transaction ID: {userId.id}")
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"""
+            Search for the given Transaction ID: '{userId.id}' within the string representation of the provided data: '{email_texts}'.
+            If the ID is found, return the string "payment successful".
+            Otherwise, return "make payment first". response output must be in one line. You are AI, so follow these instructions.
+            """
+        )
 
+        llm_response = response.text if hasattr(response, 'text') else response.candidates[0].content.parts[0].text
+        print(f"LLM Response: {llm_response}")
+        return JSONResponse(content={"message": llm_response})
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(content={"message": "Error fetching email data"}, status_code=500)
