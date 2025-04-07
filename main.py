@@ -10,7 +10,7 @@ from firebase_admin import credentials, firestore
 from google import genai
 
 # Firebase initialization
-cred = credentials.Certificate('credentials.json')  # Path to your Firebase credentials JSON file
+cred = credentials.Certificate('nys-quiz-firebase-adminsdk-fbsvc-475443bfe2.json')  # Path to your Firebase credentials JSON file
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 emails_ref = db.collection('captured_emails')  # Collection to store emails
@@ -118,15 +118,15 @@ def Id(userId: getId):
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=f"""
-            Search for the given Transaction ID: '{userId.id}' within the string representation of the provided data: '{email_texts}'.
-            If the ID is found, return the string "payment successful".
+            Search for the given Transaction ID: '{userId.id}' and 'deposit balace' within the string representation of the provided data: '{email_texts}'.
+            If the ID is found and deposit money is equal to 50 pkr , return the string "Success".
             Otherwise, return "make payment first". response output must be in one line. You are AI, so follow these instructions.
             """
         )
 
         llm_response = response.text if hasattr(response, 'text') else response.candidates[0].content.parts[0].text
         print(f"LLM Response: {llm_response}")
-        return JSONResponse(content={"message": llm_response})
+        return llm_response
 
     except Exception as e:
         print(f"Error: {e}")
