@@ -44,6 +44,7 @@ app = FastAPI()
 origins = [
     "https://www.nysquiz.com",
     "https://nysquiz-nextjs.vercel.app",
+    "https://psychic-spoon-jj94wjrj5gg4fj5x4-3000.app.github.dev",
 ]
 
 app.add_middleware(
