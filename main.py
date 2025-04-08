@@ -42,9 +42,8 @@ app = FastAPI()
 
 # CORS for frontend
 origins = [
-    # "https://www.nysquiz.com",
-    # "https://nysquiz-nextjs.vercel.app",
-    "https://psychic-spoon-jj94wjrj5gg4fj5x4-3000.app.github.dev",
+    "https://www.nysquiz.com",
+    "https://nysquiz-nextjs.vercel.app",
 ]
 
 app.add_middleware(
