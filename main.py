@@ -130,14 +130,14 @@ def Id(userId: getId):
         
         for email_doc in emails:
             email_data = email_doc.to_dict()  # Get the data of each email document
-            print(f"Email Data: {email_data}")  # Log the fetched email data
+            # print(f"Email Data: {email_data}")  # Log the fetched email data
             email_texts += email_data.get('body', '')  # Concatenate all email bodies
 
         if not email_texts:
             raise ValueError("No email body found.")
 
         # Use the LLM to check the transaction ID in the emails
-        print(f"Transaction ID: {userId.id}")
+        # print(f"Transaction ID: {userId.id}")
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=f"""
@@ -148,7 +148,7 @@ def Id(userId: getId):
         )
 
         llm_response = response.text if hasattr(response, 'text') else response.candidates[0].content.parts[0].text
-        print(f"LLM Response: {llm_response}")
+        # print(f"LLM Response: {llm_response}")
         return llm_response
 
     except Exception as e:
