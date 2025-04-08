@@ -8,10 +8,27 @@ from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google import genai
+import os
+import base64
 
 # Firebase initialization
-cred = credentials.Certificate('nys-quiz-firebase-adminsdk-fbsvc-475443bfe2.json')  # Path to your Firebase credentials JSON file
-firebase_admin.initialize_app(cred)
+
+# Get base64-encoded credentials from env
+firebase_b64 = os.getenv("FIREBASE_CREDENTIALS")
+
+if firebase_b64:
+    decoded = base64.b64decode(firebase_b64).decode("utf-8")
+    with open("credentials.json", "w") as f:
+        f.write(decoded)
+
+    cred = credentials.Certificate("credentials.json")
+    firebase_admin.initialize_app(cred)
+else:
+    raise Exception("FIREBASE_CREDENTIALS not found in environment")
+
+
+# cred = credentials.Certificate('nys-quiz-firebase-adminsdk-fbsvc-475443bfe2.json')  # Path to your Firebase credentials JSON file
+# firebase_admin.initialize_app(cred)
 db = firestore.client()
 emails_ref = db.collection('captured_emails')  # Collection to store emails
 
